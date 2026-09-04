@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.vite/
+src-tauri/target/
+src-tauri/gen/
+
+# ffmpeg/ffprobe sidecars: ~138 MB each, over GitHub's 100 MB file limit.
+# Run tools/fetch-ffmpeg.ps1 to populate this directory.
+src-tauri/binaries/
+
+# Generated test media and scratch exports
+testclips/
+big/
+*.hveproj
+
+# Updater signing key — must never be committed
+*.key

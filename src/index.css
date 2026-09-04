@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-[#141519] text-neutral-200;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-neutral-700 rounded;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-neutral-600;
+  }
+
+  input[type="range"] {
+    @apply accent-accent;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-3 py-1.5 rounded bg-panelAlt border border-edge text-neutral-200
+           hover:bg-neutral-700 active:bg-neutral-600 disabled:opacity-40
+           disabled:cursor-not-allowed transition-colors;
+  }
+  .btn-primary {
+    @apply px-3 py-1.5 rounded bg-accent border border-accent text-white
+           hover:brightness-110 active:brightness-95 disabled:opacity-40
+           disabled:cursor-not-allowed transition-all;
+  }
+  .field {
+    @apply bg-[#15171c] border border-edge rounded px-2 py-1 text-neutral-200
+           focus:outline-none focus:border-accent w-full;
+  }
+  .label {
+    @apply text-[11px] uppercase tracking-wide text-neutral-500 mb-1 block;
+  }
+  .panel {
+    @apply bg-panel border border-edge rounded;
+  }
+}
