@@ -27,7 +27,9 @@
 use anyhow::{anyhow, Result};
 
 use super::caps::Capabilities;
-use super::filtergraph::{fmt, music_filter_chain, video_encoder_args, ExportSettings, SAMPLE_RATE};
+use super::filtergraph::{
+    fmt, music_filter_chain, video_encoder_args, ExportSettings, SAMPLE_RATE,
+};
 use crate::project::{Project, ResolvedTimeline};
 
 /// Bodies shorter than this are dropped rather than encoded; a segment of a
@@ -96,7 +98,11 @@ pub fn plan_segments(project: &Project, resolved: &ResolvedTimeline) -> Result<V
         }
 
         if i + 1 < n {
-            if let Some(t) = resolved.boundaries.get(i).and_then(|b| b.transition.as_ref()) {
+            if let Some(t) = resolved
+                .boundaries
+                .get(i)
+                .and_then(|b| b.transition.as_ref())
+            {
                 let next = &project.timeline[i + 1];
                 segments.push(Segment {
                     kind: SegmentKind::Transition {
@@ -122,7 +128,13 @@ pub fn plan_segments(project: &Project, resolved: &ResolvedTimeline) -> Result<V
 /// `xfade` hard-errors on mismatched size, SAR, timebase or frame rate and
 /// rejects 4:2:0 outright, so transition segments work in yuv444p and convert
 /// back afterwards.
-fn normalise(input: usize, label: &str, len: f64, settings: &ExportSettings, format: &str) -> String {
+fn normalise(
+    input: usize,
+    label: &str,
+    len: f64,
+    settings: &ExportSettings,
+    format: &str,
+) -> String {
     format!(
         "[{input}:v:0]fps={},scale={w}:{h}:force_original_aspect_ratio=decrease,\
 pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,setpts=PTS-STARTPTS,\
@@ -166,6 +178,35 @@ fn push_silence(args: &mut Vec<String>) {
     ));
 }
 
+/// The pieces of an ffmpeg command as it is assembled. Handing out input
+/// indices here keeps callers from tracking them by hand, which is the easiest
+/// thing to get wrong when a segment mixes real sources with silence.
+#[derive(Default)]
+struct Cmd {
+    input_index: usize,
+    inputs: Vec<String>,
+    graph: Vec<String>,
+    outputs: Vec<String>,
+}
+
+impl Cmd {
+    /// Open a real media file, seeking before `-i`, and return its input index.
+    fn source(&mut self, path: &str, start: f64, len: f64, nvdec: bool) -> usize {
+        push_source(&mut self.inputs, path, start, len, nvdec);
+        let i = self.input_index;
+        self.input_index += 1;
+        i
+    }
+
+    /// Open a silent audio source and return its input index.
+    fn silence(&mut self) -> usize {
+        push_silence(&mut self.inputs);
+        let i = self.input_index;
+        self.input_index += 1;
+        i
+    }
+}
+
 /// Append one segment's inputs, filters and output to a command being built.
 fn push_segment(
     project: &Project,
@@ -174,10 +215,7 @@ fn push_segment(
     settings: &ExportSettings,
     output: &str,
     slot: usize,
-    input_index: &mut usize,
-    inputs: &mut Vec<String>,
-    graph: &mut Vec<String>,
-    outputs: &mut Vec<String>,
+    cmd: &mut Cmd,
 ) -> Result<()> {
     let len = segment.duration;
     let v = format!("v{slot}");
@@ -189,21 +227,18 @@ fn push_segment(
             src_start,
         } => {
             let clip = &project.timeline[*clip_index];
-            let media = project
-                .media_for(&clip.media_id)
-                .ok_or_else(|| anyhow!("Clip references media that is no longer in the project."))?;
+            let media = project.media_for(&clip.media_id).ok_or_else(|| {
+                anyhow!("Clip references media that is no longer in the project.")
+            })?;
 
-            let src = *input_index;
-            push_source(inputs, &media.path, *src_start, len, settings.use_nvdec);
-            *input_index += 1;
-            graph.push(normalise(src, &v, len, settings, "yuv420p"));
+            let src = cmd.source(&media.path, *src_start, len, settings.use_nvdec);
+            cmd.graph.push(normalise(src, &v, len, settings, "yuv420p"));
 
             if media.has_audio && !clip.muted {
-                graph.push(normalise_audio(src, &a, len));
+                cmd.graph.push(normalise_audio(src, &a, len));
             } else {
-                push_silence(inputs);
-                graph.push(normalise_audio(*input_index, &a, len));
-                *input_index += 1;
+                let s = cmd.silence();
+                cmd.graph.push(normalise_audio(s, &a, len));
             }
         }
         SegmentKind::Transition {
@@ -214,25 +249,23 @@ fn push_segment(
         } => {
             let a_clip = &project.timeline[*boundary_index];
             let b_clip = &project.timeline[*boundary_index + 1];
-            let a_media = project
-                .media_for(&a_clip.media_id)
-                .ok_or_else(|| anyhow!("Clip references media that is no longer in the project."))?;
-            let b_media = project
-                .media_for(&b_clip.media_id)
-                .ok_or_else(|| anyhow!("Clip references media that is no longer in the project."))?;
+            let a_media = project.media_for(&a_clip.media_id).ok_or_else(|| {
+                anyhow!("Clip references media that is no longer in the project.")
+            })?;
+            let b_media = project.media_for(&b_clip.media_id).ok_or_else(|| {
+                anyhow!("Clip references media that is no longer in the project.")
+            })?;
 
-            let a_src = *input_index;
-            push_source(inputs, &a_media.path, *a_src_start, len, settings.use_nvdec);
-            *input_index += 1;
-            let b_src = *input_index;
-            push_source(inputs, &b_media.path, *b_src_start, len, settings.use_nvdec);
-            *input_index += 1;
+            let a_src = cmd.source(&a_media.path, *a_src_start, len, settings.use_nvdec);
+            let b_src = cmd.source(&b_media.path, *b_src_start, len, settings.use_nvdec);
 
-            graph.push(normalise(a_src, &format!("{v}a"), len, settings, "yuv444p"));
-            graph.push(normalise(b_src, &format!("{v}b"), len, settings, "yuv444p"));
+            cmd.graph
+                .push(normalise(a_src, &format!("{v}a"), len, settings, "yuv444p"));
+            cmd.graph
+                .push(normalise(b_src, &format!("{v}b"), len, settings, "yuv444p"));
             // Both inputs are exactly `len` long and start at zero, so the
             // crossfade covers the whole segment and offset is 0.
-            graph.push(format!(
+            cmd.graph.push(format!(
                 "[{v}a][{v}b]xfade=transition={kind}:duration={0}:offset=0,format=yuv420p[{v}]",
                 fmt(len)
             ));
@@ -240,41 +273,38 @@ fn push_segment(
             let a_audio = if a_media.has_audio && !a_clip.muted {
                 a_src
             } else {
-                push_silence(inputs);
-                let i = *input_index;
-                *input_index += 1;
-                i
+                cmd.silence()
             };
             let b_audio = if b_media.has_audio && !b_clip.muted {
                 b_src
             } else {
-                push_silence(inputs);
-                let i = *input_index;
-                *input_index += 1;
-                i
+                cmd.silence()
             };
 
-            graph.push(normalise_audio(a_audio, &format!("{a}a"), len));
-            graph.push(normalise_audio(b_audio, &format!("{a}b"), len));
+            cmd.graph
+                .push(normalise_audio(a_audio, &format!("{a}a"), len));
+            cmd.graph
+                .push(normalise_audio(b_audio, &format!("{a}b"), len));
             // acrossfade of two `len`-long inputs yields exactly `len`.
-            graph.push(format!(
+            cmd.graph.push(format!(
                 "[{a}a][{a}b]acrossfade=d={}:c1=tri:c2=tri[{a}]",
                 fmt(len)
             ));
         }
     }
 
-    outputs.push("-map".into());
-    outputs.push(format!("[{v}]"));
-    outputs.push("-map".into());
-    outputs.push(format!("[{a}]"));
-    outputs.extend(video_encoder_args(caps, settings, settings.fps));
+    cmd.outputs.push("-map".into());
+    cmd.outputs.push(format!("[{v}]"));
+    cmd.outputs.push("-map".into());
+    cmd.outputs.push(format!("[{a}]"));
+    cmd.outputs
+        .extend(video_encoder_args(caps, settings, settings.fps));
     // PCM, not AAC: AAC's per-file encoder delay would click at every join.
-    outputs.push("-c:a".into());
-    outputs.push("pcm_s16le".into());
-    outputs.push("-ar".into());
-    outputs.push(SAMPLE_RATE.to_string());
-    outputs.push(output.to_string());
+    cmd.outputs.push("-c:a".into());
+    cmd.outputs.push("pcm_s16le".into());
+    cmd.outputs.push("-ar".into());
+    cmd.outputs.push(SAMPLE_RATE.to_string());
+    cmd.outputs.push(output.to_string());
     Ok(())
 }
 
@@ -286,23 +316,9 @@ pub fn segment_args(
     settings: &ExportSettings,
     output: &str,
 ) -> Result<Vec<String>> {
-    let mut inputs: Vec<String> = Vec::new();
-    let mut graph: Vec<String> = Vec::new();
-    let mut outputs: Vec<String> = Vec::new();
-    let mut input_index = 0usize;
+    let mut cmd = Cmd::default();
 
-    push_segment(
-        project,
-        segment,
-        caps,
-        settings,
-        output,
-        0,
-        &mut input_index,
-        &mut inputs,
-        &mut graph,
-        &mut outputs,
-    )?;
+    push_segment(project, segment, caps, settings, output, 0, &mut cmd)?;
 
     let mut args: Vec<String> = vec![
         "-hide_banner".into(),
@@ -311,10 +327,10 @@ pub fn segment_args(
         "pipe:1".into(),
         "-nostats".into(),
     ];
-    args.extend(inputs);
+    args.extend(cmd.inputs);
     args.push("-filter_complex".into());
-    args.push(graph.join(";"));
-    args.extend(outputs);
+    args.push(cmd.graph.join(";"));
+    args.extend(cmd.outputs);
     Ok(args)
 }
 
@@ -668,9 +684,6 @@ mod tests {
     #[test]
     fn concat_list_escapes_quotes_in_paths() {
         let list = concat_list(&["C:\\a\\b.mkv".into(), "C:\\it's\\c.mkv".into()]);
-        assert_eq!(
-            list,
-            "file 'C:\\a\\b.mkv'\nfile 'C:\\it'\\''s\\c.mkv'\n"
-        );
+        assert_eq!(list, "file 'C:\\a\\b.mkv'\nfile 'C:\\it'\\''s\\c.mkv'\n");
     }
 }

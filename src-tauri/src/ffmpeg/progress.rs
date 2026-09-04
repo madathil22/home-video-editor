@@ -105,7 +105,9 @@ mod tests {
         assert!(p.push_line("frame=120").is_none());
         assert!(p.push_line("fps=47.0").is_none());
         assert!(p.push_line("out_time_us=4000000").is_none());
-        let snap = p.push_line("progress=continue").expect("block should complete");
+        let snap = p
+            .push_line("progress=continue")
+            .expect("block should complete");
         assert_eq!(snap.frame, 120);
         assert!((snap.out_time - 4.0).abs() < 1e-9);
         assert!(!snap.done);

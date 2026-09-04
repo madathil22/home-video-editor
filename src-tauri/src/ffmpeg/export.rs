@@ -284,9 +284,13 @@ pub async fn run_segmented_export(
             // Remove the truncated file so a failed export never looks like a
             // successful one in Explorer.
             let _ = std::fs::remove_file(&output_path);
-            let _ = app.emit("export:error", ExportErrorEvent { message: message.clone() });
+            let _ = app.emit(
+                "export:error",
+                ExportErrorEvent {
+                    message: message.clone(),
+                },
+            );
             Err(anyhow!(message))
         }
     }
 }
-

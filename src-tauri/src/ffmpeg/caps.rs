@@ -115,13 +115,16 @@ fn parse_transitions(help: &str) -> Vec<String> {
 }
 
 pub async fn detect(app: &AppHandle) -> Capabilities {
-    let mut caps = Capabilities::default();
-
-    caps.ffmpeg_version = capture_ok(app, FFMPEG, vec!["-hide_banner".into(), "-version".into()])
+    let ffmpeg_version = capture_ok(app, FFMPEG, vec!["-hide_banner".into(), "-version".into()])
         .await
         .ok()
         .and_then(|s| s.lines().next().map(|l| l.to_string()))
         .unwrap_or_else(|| "unknown".into());
+
+    let mut caps = Capabilities {
+        ffmpeg_version,
+        ..Default::default()
+    };
 
     match trial_encode(app, "h264_nvenc", &[]).await {
         Ok(()) => caps.nvenc_h264 = true,

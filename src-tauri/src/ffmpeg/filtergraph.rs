@@ -96,7 +96,14 @@ pub fn video_encoder_args(caps: &Capabilities, settings: &ExportSettings, fps: f
         // NVIDIA's latency-tolerant high-quality template.
         args.extend(
             [
-                "-preset", "p6", "-tune", "hq", "-rc", "vbr", "-profile:v", "high",
+                "-preset",
+                "p6",
+                "-tune",
+                "hq",
+                "-rc",
+                "vbr",
+                "-profile:v",
+                "high",
             ]
             .iter()
             .map(|s| s.to_string()),
@@ -461,8 +468,7 @@ mod tests {
     fn moves_the_graph_into_a_script_file() {
         let p = project_of(3, 5.0, TransitionSpec::default());
         let r = resolve_timeline(&p);
-        let mut built =
-            build_export_args(&p, &r, &hw_caps(), &ExportSettings::default()).unwrap();
+        let mut built = build_export_args(&p, &r, &hw_caps(), &ExportSettings::default()).unwrap();
         let inline = graph_of(&built.args);
 
         let graph = built
@@ -490,8 +496,7 @@ mod tests {
 
         let p = project_of(120, 8.0, TransitionSpec::default());
         let r = resolve_timeline(&p);
-        let mut built =
-            build_export_args(&p, &r, &hw_caps(), &ExportSettings::default()).unwrap();
+        let mut built = build_export_args(&p, &r, &hw_caps(), &ExportSettings::default()).unwrap();
 
         let inline_len: usize = built.args.iter().map(|a| a.len() + 3).sum();
         assert!(
@@ -523,8 +528,14 @@ mod tests {
         let g = graph_of(&built.args);
 
         // First boundary: 5 - 1 = 4. Second: (5 + 5 - 1) - 1 = 8.
-        assert!(g.contains("xfade=transition=fade:duration=1:offset=4"), "{g}");
-        assert!(g.contains("xfade=transition=fade:duration=1:offset=8"), "{g}");
+        assert!(
+            g.contains("xfade=transition=fade:duration=1:offset=4"),
+            "{g}"
+        );
+        assert!(
+            g.contains("xfade=transition=fade:duration=1:offset=8"),
+            "{g}"
+        );
         assert!((built.total_duration - 13.0).abs() < 1e-9);
     }
 
@@ -549,7 +560,11 @@ mod tests {
     fn uses_yuv444p_only_when_a_transition_exists() {
         let with = project_of(2, 5.0, TransitionSpec::default());
         let r = resolve_timeline(&with);
-        let g = graph_of(&build_export_args(&with, &r, &hw_caps(), &ExportSettings::default()).unwrap().args);
+        let g = graph_of(
+            &build_export_args(&with, &r, &hw_caps(), &ExportSettings::default())
+                .unwrap()
+                .args,
+        );
         // xfade cannot negotiate 4:2:0 at all.
         assert!(g.contains("format=yuv444p"), "{g}");
 
@@ -563,7 +578,11 @@ mod tests {
             },
         );
         let r2 = resolve_timeline(&without);
-        let g2 = graph_of(&build_export_args(&without, &r2, &hw_caps(), &ExportSettings::default()).unwrap().args);
+        let g2 = graph_of(
+            &build_export_args(&without, &r2, &hw_caps(), &ExportSettings::default())
+                .unwrap()
+                .args,
+        );
         assert!(g2.contains("format=yuv420p"), "{g2}");
         assert!(!g2.contains("xfade"));
         assert!(g2.contains("concat=n=2:v=1:a=0"), "{g2}");
@@ -605,7 +624,10 @@ mod tests {
         let r = resolve_timeline(&p);
         let built = build_export_args(&p, &r, &hw_caps(), &ExportSettings::default()).unwrap();
         let joined = built.args.join(" ");
-        assert!(joined.contains("anullsrc=channel_layout=stereo"), "{joined}");
+        assert!(
+            joined.contains("anullsrc=channel_layout=stereo"),
+            "{joined}"
+        );
     }
 
     #[test]
@@ -643,7 +665,10 @@ mod tests {
         let g = graph_of(&built.args);
 
         // normalize=0 stops amix halving the clip audio.
-        assert!(g.contains("amix=inputs=2:duration=first:dropout_transition=0:normalize=0"), "{g}");
+        assert!(
+            g.contains("amix=inputs=2:duration=first:dropout_transition=0:normalize=0"),
+            "{g}"
+        );
         assert!(g.contains("volume=0.18"), "{g}");
         // Timeline is 9s, so the fade-out starts at 9 - 3 = 6.
         assert!(g.contains("afade=t=out:st=6:d=3"), "{g}");

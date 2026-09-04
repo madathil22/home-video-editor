@@ -145,9 +145,18 @@ pub async fn ensure_proxy(
         // Proxies are throwaway, so favour speed over quality.
         if caps.nvenc_h264 {
             args.extend(
-                ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "30"]
-                    .iter()
-                    .map(|s| s.to_string()),
+                [
+                    "-c:v",
+                    "h264_nvenc",
+                    "-preset",
+                    "p1",
+                    "-rc",
+                    "vbr",
+                    "-cq",
+                    "30",
+                ]
+                .iter()
+                .map(|s| s.to_string()),
             );
         } else {
             args.extend(
