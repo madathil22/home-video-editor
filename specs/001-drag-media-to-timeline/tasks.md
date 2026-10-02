@@ -64,7 +64,7 @@
 ## Phase 6: Polish & Cross-Cutting
 
 - [X] T018 Run `npm run typecheck` and `npm run test`; fix any failures
-- [ ] T019 Run the manual validation in `specs/001-drag-media-to-timeline/quickstart.md` with `npm run tauri dev`, including the regression step (trim, reorder, OS file drop import)
+- [X] T019 Run the manual validation in `specs/001-drag-media-to-timeline/quickstart.md` with `npm run tauri dev`, including the regression step (trim, reorder, OS file drop import)
 
 ## Dependencies & Execution Order
 
