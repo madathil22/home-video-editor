@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
 
@@ -17,6 +17,7 @@ export default defineConfig({
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     watch: { ignored: ["**/src-tauri/**"] },
   },
+  test: { environment: "node", include: ["src/**/*.test.ts"] },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: {
     target: "chrome105",

@@ -27,6 +27,10 @@ interface EditorState {
 
   selectedClipIds: string[];
   selectedBoundary: number | null;
+  /** Media bin selection; transient, never saved. */
+  selectedMediaIds: string[];
+  /** Active drag from the media bin to the timeline; transient, never saved. */
+  mediaDrag: { mediaIds: string[]; x: number; y: number } | null;
   playhead: number;
   isPlaying: boolean;
   /** Timeline zoom, in pixels per second. */
@@ -58,7 +62,7 @@ interface EditorState {
   setProxyStatus: (mediaId: string, status: ProxyStatus) => void;
   removeMedia: (mediaId: string) => void;
 
-  addToTimeline: (mediaIds: string[]) => void;
+  addToTimeline: (mediaIds: string[], atIndex?: number) => void;
   deleteSelectedClips: () => void;
   moveClip: (clipId: string, toIndex: number) => void;
   trimClip: (clipId: string, inPoint: number, outPoint: number, silent?: boolean) => void;
@@ -69,6 +73,11 @@ interface EditorState {
   clearSelection: () => void;
   selectBoundary: (index: number | null) => void;
 
+  selectMedia: (id: string, mode: "single" | "toggle" | "range") => void;
+  clearMediaSelection: () => void;
+  beginMediaDrag: (mediaIds: string[], x: number, y: number) => void;
+  updateMediaDrag: (x: number, y: number) => void;
+  endMediaDrag: () => void;
   applyTransitionToAll: (kind: string, duration: number) => void;
   setTransitionsEnabled: (enabled: boolean) => void;
   setBoundaryOverride: (
@@ -102,6 +111,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   selectedClipIds: [],
   selectedBoundary: null,
+  selectedMediaIds: [],
+  mediaDrag: null,
   playhead: 0,
   isPlaying: false,
   zoom: 40,
@@ -227,9 +238,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       timeline,
       transitionOverrides: pruneOverrides(project.transitionOverrides, timeline),
     });
+    set((s) => ({ selectedMediaIds: s.selectedMediaIds.filter((id) => id !== mediaId) }));
   },
 
-  addToTimeline: (mediaIds) => {
+  addToTimeline: (mediaIds, atIndex) => {
     const { project } = get();
     const additions: Clip[] = [];
     for (const id of mediaIds) {
@@ -244,7 +256,13 @@ export const useEditor = create<EditorState>((set, get) => ({
       });
     }
     if (additions.length === 0) return;
-    get().commit({ ...project, timeline: [...project.timeline, ...additions] });
+    const at =
+      atIndex === undefined
+        ? project.timeline.length
+        : Math.max(0, Math.min(project.timeline.length, atIndex));
+    const timeline = [...project.timeline];
+    timeline.splice(at, 0, ...additions);
+    get().commit({ ...project, timeline });
   },
 
   deleteSelectedClips: () => {
@@ -313,6 +331,32 @@ export const useEditor = create<EditorState>((set, get) => ({
   selectAllClips: () => set((s) => ({ selectedClipIds: s.project.timeline.map((c) => c.id) })),
   clearSelection: () => set({ selectedClipIds: [], selectedBoundary: null }),
   selectBoundary: (index) => set({ selectedBoundary: index, selectedClipIds: [] }),
+
+  selectMedia: (id, mode) =>
+    set((s) => {
+      if (mode === "toggle") {
+        return {
+          selectedMediaIds: s.selectedMediaIds.includes(id)
+            ? s.selectedMediaIds.filter((x) => x !== id)
+            : [...s.selectedMediaIds, id],
+        };
+      }
+      if (mode === "range" && s.selectedMediaIds.length > 0) {
+        const order = s.project.media.map((m) => m.id);
+        const a = order.indexOf(s.selectedMediaIds[s.selectedMediaIds.length - 1]);
+        const b = order.indexOf(id);
+        if (a >= 0 && b >= 0) {
+          return { selectedMediaIds: order.slice(Math.min(a, b), Math.max(a, b) + 1) };
+        }
+      }
+      return { selectedMediaIds: [id] };
+    }),
+  clearMediaSelection: () => set({ selectedMediaIds: [] }),
+
+  beginMediaDrag: (mediaIds, x, y) => set({ mediaDrag: { mediaIds, x, y } }),
+  updateMediaDrag: (x, y) =>
+    set((s) => (s.mediaDrag ? { mediaDrag: { ...s.mediaDrag, x, y } } : {})),
+  endMediaDrag: () => set({ mediaDrag: null }),
 
   /** The headline action: one transition across every boundary at once. */
   applyTransitionToAll: (kind, duration) => {
@@ -388,6 +432,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       future: [],
       selectedClipIds: [],
       selectedBoundary: null,
+      selectedMediaIds: [],
+      mediaDrag: null,
       playhead: 0,
       proxyStatus: Object.fromEntries(
         project.media.map((m) => [m.id, m.proxyPath ? "done" : "pending"])

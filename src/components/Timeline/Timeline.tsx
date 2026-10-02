@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useEditor } from "@/state/projectStore";
 import { formatTime } from "@/lib/format";
+import { slotIndexAtTime } from "@/lib/timelineSlots";
 import ClipItem from "./ClipItem";
 import Ruler from "./Ruler";
 import TransitionMarker from "./TransitionMarker";
@@ -94,8 +95,10 @@ export default function Timeline() {
           const x = e.clientX - rect.left + scrollLeft;
           const time = x / zoom;
           // Drop into whichever slot the cursor is nearest.
-          let target = resolved.clips.findIndex((c) => time < (c.start + c.end) / 2);
-          if (target < 0) target = project.timeline.length - 1;
+          const target = Math.min(
+            slotIndexAtTime(resolved.clips, time),
+            project.timeline.length - 1
+          );
           moveClip(move.clipId, target);
         }
       }
@@ -110,6 +113,45 @@ export default function Timeline() {
       window.removeEventListener("mouseup", onUp);
     };
   }, [zoom, trimClip, moveClip, resolved.clips, project.timeline.length]);
+
+  // --- drag from the media bin ---------------------------------------------
+  const trackRef = useRef<HTMLDivElement>(null);
+  const mediaDrag = useEditor((s) => s.mediaDrag);
+  const addToTimeline = useEditor((s) => s.addToTimeline);
+  const endMediaDrag = useEditor((s) => s.endMediaDrag);
+  const resolvedClipsRef = useRef(resolved.clips);
+  resolvedClipsRef.current = resolved.clips;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
+  /** Insertion slot under the pointer, or null when it is not over the track. */
+  const slotAt = useCallback((x: number, y: number): number | null => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return null;
+    return slotIndexAtTime(resolvedClipsRef.current, (x - rect.left) / zoomRef.current);
+  }, []);
+
+  const dragging = mediaDrag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const onUp = (e: MouseEvent) => {
+      const drag = useEditor.getState().mediaDrag;
+      const slot = slotAt(e.clientX, e.clientY);
+      if (drag && slot !== null) addToTimeline(drag.mediaIds, slot);
+      endMediaDrag();
+    };
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [dragging, slotAt, addToTimeline, endMediaDrag]);
+
+  const dropSlot = mediaDrag ? slotAt(mediaDrag.x, mediaDrag.y) : null;
+  const clips = resolved.clips;
+  const dropX =
+    dropSlot === null
+      ? null
+      : (dropSlot < clips.length ? clips[dropSlot].start : (clips[clips.length - 1]?.end ?? 0)) *
+        zoom;
 
   const seekFromEvent = (e: React.MouseEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -157,6 +199,7 @@ export default function Timeline() {
           </div>
 
           <div
+            ref={trackRef}
             className="relative mt-2 mx-0"
             style={{ height: TRACK_HEIGHT }}
             onMouseDown={(e) => {
@@ -168,8 +211,15 @@ export default function Timeline() {
           >
             {project.timeline.length === 0 && (
               <div className="absolute inset-0 grid place-items-center text-neutral-600 text-xs">
-                Add clips from the panel on the left to start building your video.
+                Drag clips here from the panel on the left to start building your video.
               </div>
+            )}
+
+            {dropX !== null && (
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-accent z-50 pointer-events-none"
+                style={{ left: dropX }}
+              />
             )}
 
             {resolved.clips.map((layout, i) => {

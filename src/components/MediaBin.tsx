@@ -1,7 +1,10 @@
+import { useEffect, useRef } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEditor } from "@/state/projectStore";
 import { formatTime } from "@/lib/format";
 import { importPaths, pickVideoFiles, pickVideoFolder } from "@/lib/import";
+
+const DRAG_THRESHOLD_PX = 6;
 
 export default function MediaBin() {
   const media = useEditor((s) => s.project.media);
@@ -9,8 +12,66 @@ export default function MediaBin() {
   const addToTimeline = useEditor((s) => s.addToTimeline);
   const removeMedia = useEditor((s) => s.removeMedia);
   const timeline = useEditor((s) => s.project.timeline);
+  const selectedMediaIds = useEditor((s) => s.selectedMediaIds);
+  const selectMedia = useEditor((s) => s.selectMedia);
+  const clearMediaSelection = useEditor((s) => s.clearMediaSelection);
+  const mediaDrag = useEditor((s) => s.mediaDrag);
 
   const usedCount = (mediaId: string) => timeline.filter((c) => c.mediaId === mediaId).length;
+
+  // A press only becomes a drag after the pointer travels a few pixels, so
+  // clicks and double-clicks keep working.
+  const pressRef = useRef<{ x: number; y: number; ids: string[] } | null>(null);
+
+  const onCardMouseDown = (e: React.MouseEvent, id: string) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    const state = useEditor.getState();
+    const selected = state.selectedMediaIds.includes(id);
+    const wanted = new Set(selected ? state.selectedMediaIds : [id]);
+    const ids = state.project.media
+      .filter((m) => wanted.has(m.id) && state.proxyStatus[m.id] !== "error")
+      .map((m) => m.id);
+    pressRef.current = ids.length > 0 ? { x: e.clientX, y: e.clientY, ids } : null;
+  };
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const state = useEditor.getState();
+      if (state.mediaDrag) {
+        state.updateMediaDrag(e.clientX, e.clientY);
+        return;
+      }
+      const press = pressRef.current;
+      if (
+        press &&
+        Math.hypot(e.clientX - press.x, e.clientY - press.y) > DRAG_THRESHOLD_PX
+      ) {
+        pressRef.current = null;
+        state.beginMediaDrag(press.ids, e.clientX, e.clientY);
+      }
+    };
+    const onUp = () => {
+      pressRef.current = null;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        pressRef.current = null;
+        useEditor.getState().endMediaDrag();
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const dragThumb = mediaDrag
+    ? media.find((m) => m.id === mediaDrag.mediaIds[0])?.thumbnailPath
+    : null;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -40,7 +101,12 @@ export default function MediaBin() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto min-h-0 px-2 pb-2 space-y-1">
+      <div
+        className="flex-1 overflow-y-auto min-h-0 px-2 pb-2 space-y-1 select-none"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) clearMediaSelection();
+        }}
+      >
         {media.length === 0 && (
           <div className="text-neutral-500 text-xs text-center px-3 py-10 leading-relaxed">
             Drop your clips here,
@@ -52,13 +118,22 @@ export default function MediaBin() {
         {media.map((m) => {
           const status = proxyStatus[m.id] ?? "pending";
           const used = usedCount(m.id);
+          const isSelected = selectedMediaIds.includes(m.id);
           return (
             <div
               key={m.id}
-              className="group flex gap-2 p-1.5 rounded bg-panelAlt border border-edge
-                         hover:border-neutral-600 cursor-pointer transition-colors"
+              className={`group flex gap-2 p-1.5 rounded bg-panelAlt border
+                         cursor-pointer transition-colors ${
+                           isSelected
+                             ? "border-accent"
+                             : "border-edge hover:border-neutral-600"
+                         }`}
+              onMouseDown={(e) => onCardMouseDown(e, m.id)}
+              onClick={(e) =>
+                selectMedia(m.id, e.shiftKey ? "range" : e.ctrlKey || e.metaKey ? "toggle" : "single")
+              }
               onDoubleClick={() => addToTimeline([m.id])}
-              title={`${m.path}\n\nDouble-click to add to the timeline`}
+              title={`${m.path}\n\nDrag to the timeline, or double-click to add`}
             >
               <div className="w-20 h-12 shrink-0 rounded overflow-hidden bg-black relative">
                 {m.thumbnailPath ? (
@@ -110,6 +185,23 @@ export default function MediaBin() {
           );
         })}
       </div>
+
+      {mediaDrag && (
+        <div
+          className="fixed z-[100] pointer-events-none w-20 h-12 rounded overflow-hidden bg-black
+                     border border-accent opacity-80"
+          style={{ left: mediaDrag.x + 8, top: mediaDrag.y + 8 }}
+        >
+          {dragThumb && (
+            <img src={convertFileSrc(dragThumb)} className="w-full h-full object-cover" alt="" />
+          )}
+          {mediaDrag.mediaIds.length > 1 && (
+            <div className="absolute bottom-0.5 right-0.5 bg-accent text-white text-[10px] px-1 rounded">
+              {mediaDrag.mediaIds.length}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
